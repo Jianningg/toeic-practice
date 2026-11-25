@@ -1,7 +1,7 @@
 "use strict";
 
 const prefix = "toeic-practice-";
-const cacheName = prefix + "4";
+const cacheName = prefix + "5";
 const scope = new URL(self.registration.scope);
 const shell = ["./", "index.html", "style.css", "app.js", "bank.js", "timings.js",
   "study-data.js", "install.js", "manifest.webmanifest", "icon-192.png", "icon-512.png",

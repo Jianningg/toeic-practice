@@ -25,7 +25,7 @@ const pets = ["太陽", "紅白條紋", "比愛心", "黃色墨鏡", "黑色上�
 const petLines = ["一起練習吧！", "做完這題就很棒！", "準備好再聽一次。", "照自己的節奏來！"];
 let petMessage = 0;
 let petTimer;
-const filters = { unitRound: 0, unitCount: state.unitCount, mockScope: "all", wrongPart: 0, wrongRound: 0, wrongStatus: "open" };
+const filters = { unitRound: 0, unitOrder: "smart", unitQuery: "", unitCount: state.unitCount, mockScope: "all", wrongPart: 0, wrongRound: 0, wrongStatus: "open" };
 const study = window.createStudyData(questions, () => state, mergeStudy, updateSettings, profile, switchStudyProfile);
 const icons = {
   headphones: '<path d="M3 14v-3a9 9 0 0 1 18 0v3M3 14v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Zm13 0v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1a2 2 0 0 0-2 2Z"/>',
@@ -92,6 +92,49 @@ function stats() {
     '</strong></div><div><span class="muted small">作答正確率</span><strong>' + percentage(totals.correct, totals.answered) +
     '</strong></div><div><span class="muted small">待訂正</span><strong>' + Object.values(state.wrong).filter(entry => !entry.corrected).length + "</strong></div></div>";
 }
+// Derive study insights from completed attempts; no new sync schema is needed.
+function learningInsights() {
+  const seen = new Set();
+  const answers = [];
+  const byPart = parts.map(() => ({ correct: 0, answered: 0 }));
+  for (const attempt of [...state.attempts].sort((a, b) => a.ended - b.ended)) {
+    for (const id of attempt.ids) {
+      const q = questions.get(id);
+      if (!q || !attempt.answers[id]) continue;
+      seen.add(id);
+      const correct = attempt.answers[id] === q.answer;
+      answers.push(correct);
+      byPart[q.part - 1].answered++;
+      byPart[q.part - 1].correct += Number(correct);
+    }
+  }
+  // Checked practice questions count as seen even before the session is submitted.
+  for (const id of Object.keys(state.active?.checked || {})) {
+    if (state.active.checked[id]) seen.add(id);
+  }
+  const recent = answers.slice(-50);
+  const weak = byPart.map((row, index) => ({ ...row, part: index + 1 }))
+    .filter(row => row.answered > 0)
+    .sort((a, b) => a.correct / a.answered - b.correct / b.answered || a.part - b.part)[0];
+  return { seen, recent, weak };
+}
+function insightPanel() {
+  const { seen, recent, weak } = learningInsights();
+  return '<div class="stats spaced"><div><span class="muted small">題庫涵蓋率</span><strong>' +
+    percentage(seen.size, bank.questions.length) + '</strong><span class="small">已練 ' + seen.size + ' / ' + bank.questions.length +
+    ' 題</span></div><div><span class="muted small">近期正確率</span><strong>' +
+    percentage(recent.filter(Boolean).length, recent.length) + '</strong><span class="small">最近 ' + recent.length +
+    ' 題已交卷作答</span></div><div><span class="muted small">建議加強</span><strong>' +
+    (weak ? 'Part ' + weak.part : '尚無紀錄') + '</strong>' +
+    (weak ? button('智慧複習', 'practice-weak', weak.part, 'small') : '<span class="small">完成練習後提供建議</span>') + '</div></div>';
+}
+function unitMatches(q) {
+  if (filters.unitRound && q.round !== filters.unitRound) return false;
+  const query = filters.unitQuery.trim().toLocaleLowerCase();
+  return !query || [q.prompt, q.explanation, q.transcript, JSON.stringify(q.choices),
+    JSON.stringify(q.transcriptChoices), JSON.stringify(bank.groups[q.group])]
+    .join(' ').toLocaleLowerCase().includes(query);
+}
 function home() {
   const modes = [
     ["units", "book", "", "單元題庫", "依 Part 練習，每題看答案與解析。"],
@@ -105,7 +148,7 @@ function home() {
     '<a class="button secondary" href="#settings/pet">選擇陪練角色</a></div></section><section><div class="section-head"><h2>選擇練習方式</h2></div><div class="grid">' +
     modes.map(([route, graphic, color, title, subtitle]) => '<a class="card" href="#' + route + '"><span class="icon-tile ' + color + '">' + icon(graphic) +
       '</span><h3>' + title + '</h3><p class="muted small">' + subtitle + '</p></a>').join("") +
-    '</div></section><section><div class="section-head"><h2>學習概況</h2><a class="link small" href="#history">查看紀錄</a></div>' + stats() + "</section>";
+    '</div></section><section><div class="section-head"><h2>學習概況</h2><a class="link small" href="#history">查看紀錄</a></div>' + stats() + insightPanel() + "</section>";
 }
 function petFile(id = state.petId) {
   return "theme/pet-" + (pets[id - 1] ? id : 1) + ".webp";
@@ -135,16 +178,25 @@ function petSettings() {
       '<button type="button" data-action="pet-select" data-value="' + (index + 1) + '" aria-pressed="' + (state.petId === index + 1) +
       '"><img src="' + petFile(index + 1) + '" width="68" height="78" alt=""><span>' + name + '</span></button>').join("") + '</div></section>';
 }
+function unitPool(part) {
+  const matchedGroups = new Set(bank.questions.filter(q => q.part === part && unitMatches(q)).map(q => q.group));
+  return bank.questions.filter(q => q.part === part && matchedGroups.has(q.group));
+}
 function units() {
   const tiles = (start, end) => '<div class="grid">' + parts.slice(start - 1, end).map(([name, english], i) => {
     const part = start + i;
-    const count = bank.questions.filter(q => q.part === part && (!filters.unitRound || q.round === filters.unitRound)).length;
+    const count = unitPool(part).length;
     return '<article class="card"><span class="badge">Part ' + part + "</span><h3>" + name + '</h3><p class="muted small">' + english + " · " + count +
-      ' 題</p><div>' + button("開始練習", "start-unit", part) + "</div></article>";
+      ' 題</p><div>' + button("開始練習", "start-unit", part, "", !count) + "</div></article>";
   }).join("") + "</div>";
   return heading("單元題庫", "選一個 Part 開始。共用素材的題組會完整出題。") +
     '<div class="filters"><label>回次 ' + select("unitRound", roundChoices()) + '</label><label>練習題數 ' +
-    select("unitCount", [[10, "約 10 題"], [20, "約 20 題"], [0, "全部題目"]]) + '</label></div>' +
+    select("unitCount", [[10, "約 10 題"], [20, "約 20 題"], [0, "全部題目"]]) + '</label><label>出題順序 ' +
+    select("unitOrder", [["smart", "智慧複習"], ["random", "隨機"], ["sequence", "依題號"]]) + '</label></div>' +
+    '<form id="unit-search" class="filters" role="search"><label for="unit-query">關鍵字</label>' +
+    '<input id="unit-query" type="search" maxlength="100" placeholder="搜尋題目、選項、逐字稿與解析" value="' + esc(filters.unitQuery) +
+    '"><button type="submit">搜尋</button>' + button('清除', 'clear-search') + '</form>' +
+    '<p class="muted small">智慧複習優先出待訂正、未練過的題組。搜尋命中任一題時仍保留完整題組；圖片中的文字不在搜尋範圍。</p>'  +
     '<div class="section-head"><h2>聽力</h2></div>' + tiles(1, 4) + '<div class="section-head"><h2>閱讀</h2></div>' + tiles(5, 7);
 }
 function mocks() {
@@ -196,7 +248,7 @@ function history() {
     }
     return '<div class="row"><span>Part ' + (i + 1) + " · " + label + '</span><strong>' + percentage(correct, answered) + "</strong></div>";
   }).join("");
-  return heading("學習紀錄", "紀錄儲存在目前的瀏覽器。") + stats() +
+  return heading("學習紀錄", "紀錄儲存在目前的瀏覽器。") + stats() + insightPanel() +
     (state.active ? '<div class="spaced"><a class="button primary" href="#quiz">繼續作答</a></div>' : "") +
     '<div class="section-head"><h2>各 Part 正確率</h2></div><div class="grid two">' + partRows +
     '</div><div class="section-head"><h2>歷次練習</h2></div><div class="list">' +
@@ -224,7 +276,7 @@ function shuffle(items) {
   return items;
 }
 function startUnit(part) {
-  const matches = bank.questions.filter(q => q.part === part && (!filters.unitRound || filters.unitRound === q.round));
+  const matches = unitPool(part);
   const sets = new Map();
   for (const q of matches) {
     if (!sets.has(q.group)) sets.set(q.group, []);
@@ -232,7 +284,13 @@ function startUnit(part) {
   }
   const ids = [];
   const groups = [...sets.values()];
-  if (!filters.unitRound) shuffle(groups);
+  if (filters.unitOrder === "random" || filters.unitOrder === "smart") shuffle(groups);
+  if (filters.unitOrder === "smart") {
+    const { seen } = learningInsights();
+    const priority = group => group.some(id => state.wrong[id] && !state.wrong[id].corrected) ? 0 :
+      group.some(id => !seen.has(id)) ? 1 : 2;
+    groups.sort((a, b) => priority(a) - priority(b));
+  }
   for (const group of groups) {
     ids.push(...group);
     if (filters.unitCount && ids.length >= filters.unitCount) break;
@@ -606,6 +664,10 @@ app.addEventListener("click", event => {
   if (!control) return;
   const value = control.dataset.value;
   switch (control.dataset.action) {
+    case "practice-weak":
+      filters.unitOrder = "smart"; filters.unitRound = 0; filters.unitQuery = "";
+      startUnit(Number(value)); break;
+    case "clear-search": filters.unitQuery = ""; render(); break;
     case "start-unit": startUnit(Number(value)); break;
     case "start-mock": startMock(Number(value)); break;
     case "retry-one": start("retry", "錯題訂正", [value]); break;
@@ -638,6 +700,13 @@ app.addEventListener("click", event => {
     }
     case "close-image": app.querySelector("dialog").close(); break;
   }
+});
+app.addEventListener("submit", event => {
+  if (event.target.id !== "unit-search") return;
+  event.preventDefault();
+  filters.unitQuery = document.querySelector("#unit-query").value.slice(0, 100);
+  render();
+  document.querySelector("#unit-query")?.focus();
 });
 app.addEventListener("change", event => {
   const name = event.target.dataset.filter;

@@ -150,3 +150,5 @@ a.card:hover { border-color: var(--primary); }
   .quiz-head { align-items: flex-start; }
   .filters label { flex-wrap: wrap; }
 }
+
+#unit-query { min-width: 0; flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: .5rem; font: inherit; }
