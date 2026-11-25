@@ -47,7 +47,7 @@ test('scheduled delivery encrypts message, claims date, and removes expired subs
     async run(){if(sql.startsWith('DELETE')){deleted=true;return {meta:{changes:1}};} const changed=row.last_sent!==args[2];row.last_sent=args[0];return {meta:{changes:Number(changed)}};}
   };}};}}};
   const original=globalThis.fetch;
-  globalThis.fetch=async (url,options)=>{delivered++;assert.equal(new URL(url).hostname,'fcm.googleapis.com');assert.equal(options.redirect,'error');assert.equal(options.headers['Content-Encoding']||options.headers['content-encoding'],'aes128gcm');assert.ok(options.body.byteLength>0);return new Response(null,{status});};
+  globalThis.fetch=async (url,options)=>{delivered++;assert.equal(new URL(url).hostname,'fcm.googleapis.com');assert.equal(options.redirect,'manual');assert.equal(options.headers['Content-Encoding']||options.headers['content-encoding'],'aes128gcm');assert.ok(options.body.byteLength>0);return new Response(null,{status});};
   try {
     await deliverReminders(env,new Date('2026-11-25T12:00Z'));
     await deliverReminders(env,new Date('2026-11-25T12:01Z'));
@@ -74,4 +74,35 @@ test('service worker displays custom message and only opens the app question pag
   await pending;assert.equal(opened,scope+'#units');
   handlers.push({data:{json:()=>{throw new Error();}},waitUntil:p=>{pending=p;}});
   await pending;assert.equal(notification.title,'多益每日練習');
+});
+
+test('manual test records safe provider failures and runtime errors', async () => {
+  const keys = webpush.generateVAPIDKeys();
+  const recipient = await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']);
+  const subscription = {endpoint:'https://web.push.apple.com/private-endpoint', keys:{
+    p256dh:Buffer.from(await crypto.subtle.exportKey('raw',recipient.publicKey)).toString('base64url'),
+    auth:Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url')
+  }};
+  const token = 'a'.repeat(64), id = await deviceId(token);
+  let savedError;
+  const env = {VAPID_PUBLIC:keys.publicKey,VAPID_PRIVATE:keys.privateKey,VAPID_SUBJECT:'https://jianningg.github.io/',
+    DB:{prepare(sql){return {bind(...args){return {
+      async first(){return {title:'test',body:'test',subscription:JSON.stringify(subscription)};},
+      async run(){if(sql.includes('last_error')) savedError=args[0];return {meta:{changes:1}};}
+    };}};}}};
+  const request = () => new Request('https://test/push/'+id+'/test', {method:'POST',headers:{Authorization:'Bearer '+token}});
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async()=>new Response(JSON.stringify({reason:'BadJwtToken'}),{status:403});
+    let result = await pushRoute(request(),env,reply,'/push/'+id+'/test');
+    assert.equal(result.status,502);assert.equal(result.body.error,'push_rejected');
+    assert.equal(savedError,'provider:403:BadJwtToken');
+    globalThis.fetch = async (_url, options)=>{assert.equal(options.redirect,'manual');return new Response(null,{status:302,headers:{Location:'https://untrusted.example'}});};
+    result = await pushRoute(request(),env,reply,'/push/'+id+'/test');
+    assert.equal(result.body.error,'push_rejected');assert.equal(savedError,'provider:302:');
+    globalThis.fetch = async()=>{throw new Error('Failure https://web.push.apple.com/secret '+ 'a'.repeat(64));};
+    result = await pushRoute(request(),env,reply,'/push/'+id+'/test');
+    assert.equal(result.body.error,'push_runtime');
+    assert.equal(savedError.includes('apple.com'),false);assert.equal(savedError.includes('a'.repeat(64)),false);
+  } finally {globalThis.fetch=original;}
 });

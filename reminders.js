@@ -26,7 +26,16 @@
     const response = await fetch(endpoint + '/push/' + id + suffix, { method, credentials: 'omit',
       headers: { Authorization: 'Bearer ' + device.token, 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error(response.status === 429 ? '請稍候一分鐘再傳送測試。' : response.status === 503 ? '推播服務尚未設定，請完成 Worker 部署。' : '無法更新推播服務，請檢查網路後再試。');
+    if (!response.ok) {
+      let detail = {}; try { detail = await response.json(); } catch {}
+      const messages = {
+        not_subscribed: '請先按「啟用／儲存提醒」，再傳送測試。',
+        subscription_expired: '這台裝置的訂閱已失效，請重新啟用提醒。',
+        push_rejected: '推播平台未接受通知，請稍候再試。',
+        push_runtime: '伺服器發送推播時發生錯誤，已記錄供修復。'
+      };
+      throw new Error(messages[detail.error] || (response.status === 429 ? '請稍候一分鐘再傳送測試。' : response.status === 503 ? '推播服務尚未設定，請完成 Worker 部署。' : '無法更新推播服務，請檢查網路後再試。'));
+    }
     return response.json();
   }
   function fields() {

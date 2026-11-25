@@ -42,7 +42,8 @@ async function send(env, subscription, message) {
     vapidDetails: { subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC, privateKey: env.VAPID_PRIVATE },
     TTL: 900, urgency: 'normal', contentEncoding: 'aes128gcm'
   });
-  return fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10000) });
+  // Workers supports manual/follow only. Manual prevents sending credentials to redirects.
+  return fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'manual', signal: AbortSignal.timeout(10000) });
 }
 export async function pushRoute(request, env, reply, path) {
   if (request.method === 'OPTIONS') return reply(204);
@@ -68,9 +69,25 @@ export async function pushRoute(request, env, reply, path) {
     // Also cap manual test delivery to once per minute per device.
     const changed = await env.DB.prepare('UPDATE reminders SET tested_at = ? WHERE id = ? AND tested_at < ?').bind(Date.now(), id[1], Date.now() - 60000).run();
     if (!changed.meta.changes) return reply(429, { error: 'test_rate' });
-    const response = await send(env, JSON.parse(row.subscription), { title: row.title, body: row.body });
-    if ([404, 410].includes(response.status)) await env.DB.prepare('DELETE FROM reminders WHERE id = ?').bind(id[1]).run();
-    return reply(response.ok ? 200 : 502, { sent: response.ok });
+    try {
+      const response = await send(env, JSON.parse(row.subscription), { title: row.title, body: row.body });
+      if ([404, 410].includes(response.status)) {
+        await env.DB.prepare('DELETE FROM reminders WHERE id = ?').bind(id[1]).run();
+        return reply(410, { error: 'subscription_expired' });
+      }
+      let reason = '';
+      if (!response.ok) {
+        try { const data = await response.json(); if (/^[A-Za-z]{1,60}$/.test(data.reason)) reason = data.reason; } catch {}
+      }
+      await env.DB.prepare('UPDATE reminders SET last_error = ? WHERE id = ?')
+        .bind(response.ok ? '' : 'provider:' + response.status + ':' + reason, id[1]).run();
+      return reply(response.ok ? 200 : 502, { sent: response.ok, ...(!response.ok ? {error: 'push_rejected', providerStatus: response.status} : {}) });
+    } catch (error) {
+      // No endpoint, subscription keys, notification text or VAPID values in diagnostics.
+      const safe = String(error.message).replace(/https?:\/\/\S+/g, '[url]').replace(/[A-Za-z0-9_=-]{24,}/g, '[redacted]').slice(0, 200);
+      await env.DB.prepare('UPDATE reminders SET last_error = ? WHERE id = ?').bind('runtime:' + error.name + ':' + safe, id[1]).run();
+      return reply(502, {error: 'push_runtime'});
+    }
   }
   if (request.method !== 'PUT' || id[2]) return reply(405, { error: 'method' });
   let data, settings, subscription;
