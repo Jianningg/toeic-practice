@@ -43,8 +43,12 @@ main { padding-block: 2.4rem 4rem; }
 .hero .actions { margin-top: 1.4rem; }
 .hero .primary { background: white; border-color: white; color: #30339f; }
 .hero .secondary { background: #383c81; border-color: #787bb2; color: white; }
-.hero-art { width: clamp(90px, 18vw, 204px); aspect-ratio: 1; display: grid; place-items: center; border: 1px solid #8c8ce0; border-radius: 50%; box-shadow: 0 0 0 22px #a3a1ff12, 0 0 0 44px #a3a1ff0d; }
-.hero-art .icon { width: 53%; height: 53%; stroke-width: 1.35; color: #eaebff; }
+.hero-carousel { width: clamp(215px, 23vw, 280px); display: grid; gap: .55rem; }
+.theme-frame { overflow: hidden; width: 100%; aspect-ratio: 1.18; border: 1px solid #9b9ce2; border-radius: 15px; background: #303474; }
+.theme-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.theme-controls { display: flex; justify-content: center; gap: .4rem; }
+.theme-controls button { background: #343775; border-color: #8387bd; color: white; flex: 1; font-size: .875rem; padding: .38rem .45rem; white-space: nowrap; }
+.theme-controls button:hover { background: #4a4e91; border-color: #d9dbff; }
 .section-head { margin: 2rem 0 1rem; display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
 .page-head { margin-bottom: 1.35rem; }
 .page-head p { margin-top: .55rem; }
@@ -125,7 +129,8 @@ a.card:hover { border-color: var(--primary); }
 @media (max-width: 520px) {
   .grid, .grid.two { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr; }
-  .hero-art { display: none; }
+  .hero-carousel { width: min(100%, 290px); }
+  .theme-frame { aspect-ratio: 1.4; }
   .stats > div { padding: .65rem; }
   .quiz-head { align-items: flex-start; }
   .filters label { flex-wrap: wrap; }

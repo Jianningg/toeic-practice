@@ -23,6 +23,15 @@ let audioTarget = null;
 let audioNotice = "";
 let mockSavedSecond = 0;
 let mockCue = 0;
+const themePhotos = [
+  ["theme/person-1.webp", "50% 50%"], ["theme/person-2.webp", "50% 29%"],
+  ["theme/person-3.webp", "50% 38%"], ["theme/person-4.webp", "50% 43%"],
+  ["theme/person-5.webp", "50% 57%"], ["theme/person-6.webp", "50% 44%"]
+];
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+let themeIndex = 0;
+let themePlaying = !reducedMotion.matches;
+let themeTimer;
 const filters = { unitRound: 0, unitCount: state.unitCount, mockScope: "all", wrongPart: 0, wrongRound: 0, wrongStatus: "open" };
 const study = window.createStudyData(questions, () => state, mergeStudy, updateSettings);
 const icons = {
@@ -93,10 +102,34 @@ function home() {
   const resume = state.active ? ' <a class="button secondary" href="#quiz">繼續作答</a>' : "";
   return '<section class="hero"><div><h1>多益練習室</h1><p>四回多益聽力與閱讀練習，共 ' + bank.questions.length +
     ' 題。</p><div class="actions"><a class="button primary" href="#units">開始練習</a>' + resume +
-    '</div></div><div class="hero-art">' + icon("headphones") + '</div></section><section><div class="section-head"><h2>選擇練習方式</h2></div><div class="grid">' +
+    '</div></div>' + themeCarousel() + '</section><section><div class="section-head"><h2>選擇練習方式</h2></div><div class="grid">' +
     modes.map(([route, graphic, color, title, subtitle]) => '<a class="card" href="#' + route + '"><span class="icon-tile ' + color + '">' + icon(graphic) +
       '</span><h3>' + title + '</h3><p class="muted small">' + subtitle + '</p></a>').join("") +
     '</div></section><section><div class="section-head"><h2>學習概況</h2><a class="link small" href="#history">查看紀錄</a></div>' + stats() + "</section>";
+}
+function themeCarousel() {
+  const [file, position] = themePhotos[themeIndex];
+  return '<section class="hero-carousel" aria-label="主題人物輪播"><div class="theme-frame">' +
+    '<img src="' + file + '" style="object-position:' + position + '" alt="多益練習室主題人物"></div>' +
+    '<div class="theme-controls" aria-label="照片控制">' + button("上一張", "theme-previous") +
+    button(themePlaying ? "暫停" : "播放", "theme-toggle") + button("下一張", "theme-next") + '</div></section>';
+}
+function scheduleTheme() {
+  clearTimeout(themeTimer);
+  if (currentRoute !== "home" || document.hidden || !themePlaying) return;
+  const next = new Image();
+  next.src = themePhotos[(themeIndex + 1) % themePhotos.length][0];
+  themeTimer = setTimeout(() => moveTheme(1), 5000);
+}
+function moveTheme(step) {
+  themeIndex = (themeIndex + step + themePhotos.length) % themePhotos.length;
+  const photo = document.querySelector(".theme-frame img");
+  if (photo) {
+    const [file, position] = themePhotos[themeIndex];
+    photo.src = file;
+    photo.style.objectPosition = position;
+  }
+  scheduleTheme();
 }
 function units() {
   const tiles = (start, end) => '<div class="grid">' + parts.slice(start - 1, end).map(([name, english], i) => {
@@ -549,6 +582,7 @@ function render() {
     study.renderStatus();
     window.dispatchEvent(new Event("toeic-settings-rendered"));
   }
+  scheduleTheme();
   for (const link of document.querySelectorAll("nav a")) {
     if (link.hash === "#" + route) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
@@ -583,6 +617,13 @@ app.addEventListener("click", event => {
     case "pause": audio.pause(); break;
     case "replay": playClip(displayedQuestion(), true); break;
     case "mock-play": playMock(); break;
+    case "theme-previous": moveTheme(-1); break;
+    case "theme-next": moveTheme(1); break;
+    case "theme-toggle":
+      themePlaying = !themePlaying;
+      control.textContent = themePlaying ? "暫停" : "播放";
+      scheduleTheme();
+      break;
     case "backup-export": study.download(); break;
     case "sync-start": void study.connect(); break;
     case "sync-now": void study.sync(); break;
@@ -622,6 +663,13 @@ document.addEventListener("keydown", event => {
 window.addEventListener("hashchange", () => { if ((location.hash.slice(1) || "home") !== lastHash) render(); });
 window.addEventListener("toeic-sync-connected", render);
 window.addEventListener("focus", () => study.queue(250));
+document.addEventListener("visibilitychange", scheduleTheme);
+reducedMotion.addEventListener("change", event => {
+  if (event.matches) themePlaying = false;
+  const button = document.querySelector('[data-action="theme-toggle"]');
+  if (button) button.textContent = themePlaying ? "暫停" : "播放";
+  scheduleTheme();
+});
 window.addEventListener("online", () => study.queue(250));
 window.addEventListener("pagehide", () => {
   if (audioTarget?.mock && state.active?.section === "L") { state.active.offset = audio.currentTime; save(); }
