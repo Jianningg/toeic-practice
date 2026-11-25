@@ -1,0 +1,8 @@
+{
+  "name": "toeic-practice-sync",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "web-push": "4.0.0"
+  }
+}

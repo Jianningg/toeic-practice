@@ -2,8 +2,15 @@ name = "toeic-practice-sync"
 main = "index.mjs"
 compatibility_date = "2026-11-25"
 workers_dev = true
+compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "toeic-practice-sync"
 database_id = "ec42c2a0-7b26-4ea8-9132-b009ea46d13a"
+
+[triggers]
+crons = ["* * * * *"]
+
+# Configure VAPID_PUBLIC and VAPID_SUBJECT as Worker variables,
+# and VAPID_PRIVATE with `wrangler secret put VAPID_PRIVATE`.

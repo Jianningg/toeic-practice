@@ -1,3 +1,4 @@
+import { pushRoute, deliverReminders } from "./reminders.mjs";
 const origin = "https://jianningg.github.io";
 const limit = 1024 * 1024;
 const encoder = new TextEncoder();
@@ -6,7 +7,7 @@ const hex = bytes => Array.from(new Uint8Array(bytes), byte => byte.toString(16)
 function reply(status, body) {
   const headers = {
     "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, PUT, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match",
     "Cache-Control": "no-store",
     "Content-Type": "application/json; charset=utf-8",
@@ -39,11 +40,16 @@ async function readPayload(request) {
 }
 
 export default {
+  async scheduled(event, env, ctx) { ctx.waitUntil(deliverReminders(env, new Date(event.scheduledTime))); },
   async fetch(request, env) {
     const caller = request.headers.get("Origin");
     if (caller && caller !== origin) return reply(403, { error: "origin" });
     const path = new URL(request.url).pathname;
     if (request.method === "GET" && path === "/health") return reply(200, { service: "toeic-sync", version: 1 });
+    if (path.startsWith("/push/")) {
+      try { return await pushRoute(request, env, reply, path); }
+      catch { return reply(500, { error: "push_service" }); }
+    }
     const id = /^\/v1\/([a-f0-9]{64})$/.exec(path)?.[1];
     if (!id) return reply(404, { error: "route" });
     if (request.method === "OPTIONS") return reply(204);

@@ -10,7 +10,7 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = (
     ".nojekyll", "index.html", "app.js", "bank.js", "timings.js", "style.css",
-    "study-data.js", "install.js", "sw.js", "manifest.webmanifest",
+    "study-data.js", "install.js", "reminders.js", "sw.js", "manifest.webmanifest",
     "icon-192.png", "icon-512.png",
 )
 THEME = ("person-1.webp", "person-4.webp") + tuple(f"pet-{i}.webp" for i in range(1, 7))

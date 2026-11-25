@@ -4,3 +4,5 @@
 .env
 .dev.vars
 __pycache__/
+node_modules/
+.vapid-keys.json

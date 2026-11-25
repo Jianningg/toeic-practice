@@ -524,7 +524,7 @@ function settings() {
     '<div class="settings-stack"><section class="panel"><h2>練習偏好</h2><div class="actions spaced">' +
     rateSelect(state.rate) + '<label class="setting-control"><input id="autoplay" type="checkbox"' + (state.auto ? " checked" : "") +
     '> 聽力換題自動播放</label><label class="setting-control">預設練習題數 ' +
-    select("unitCount", [[10, "約 10 題"], [20, "約 20 題"], [0, "全部題目"]]) + '</label></div></section>' + petSettings() +
+    select("unitCount", [[10, "約 10 題"], [20, "約 20 題"], [0, "全部題目"]]) + '</label></div></section>' + petSettings() + '<section class="panel" id="reminder-controls"></section>' +
     '<section class="panel"><h2>跨裝置同步</h2><p class="muted spaced">第一次開啟就會取得同步碼。每組碼有自己的作答紀錄、錯題與偏好。換裝置時輸入原本的碼即可切換，請自行保管同步碼。進行中的練習留在目前瀏覽器。</p>' +
     study.controls() + '</section><section class="panel"><h2>紀錄備份</h2><p class="muted spaced">匯出 JSON 時會一起備份同步碼。匯入時會切換到備份中的碼，並和同一組碼的紀錄合併。請自己保管備份檔。</p>' +
     '<div class="actions spaced">' + button("匯出備份", "backup-export") +

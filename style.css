@@ -152,3 +152,6 @@ a.card:hover { border-color: var(--primary); }
 }
 
 #unit-query { min-width: 0; flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: .5rem; font: inherit; }
+
+.reminder-message { display: grid; gap: .4rem; }
+.reminder-message textarea { width: 100%; max-width: 40rem; padding: .6rem; border: 1px solid var(--line); border-radius: 8px; font: inherit; resize: vertical; }
