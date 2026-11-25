@@ -26,7 +26,7 @@ jobs:
       - name: Prepare website
         run: |
           mkdir _site
-          cp index.html app.js bank.js timings.js style.css _site/
+          cp index.html app.js bank.js timings.js style.css study-data.js install.js sw.js manifest.webmanifest icon-192.png icon-512.png _site/
           for round in 1 2 3 4; do
             name="listening-$round.m4a"
             cat "$name.part-1" "$name.part-2" > "_site/$name"

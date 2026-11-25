@@ -13,7 +13,7 @@ const parts = [
   ["段落填空", "Text Completion"], ["閱讀理解", "Reading Comprehension"]
 ];
 const questions = new Map(bank.questions.map(question => [question.id, question]));
-const initial = { active: null, attempts: [], wrong: {}, auto: true };
+const initial = { active: null, attempts: [], wrong: {}, auto: true, rate: 1, unitCount: 10, preferenceAt: 0 };
 let state;
 try { state = { ...initial, ...JSON.parse(localStorage.getItem(key)) }; }
 catch { state = { ...initial }; }
@@ -23,7 +23,8 @@ let audioTarget = null;
 let audioNotice = "";
 let mockSavedSecond = 0;
 let mockCue = 0;
-const filters = { unitRound: 0, unitCount: 10, mockScope: "all", wrongPart: 0, wrongRound: 0, wrongStatus: "open" };
+const filters = { unitRound: 0, unitCount: state.unitCount, mockScope: "all", wrongPart: 0, wrongRound: 0, wrongStatus: "open" };
+const study = window.createStudyData(questions, () => state, mergeStudy, updateSettings);
 const icons = {
   headphones: '<path d="M3 14v-3a9 9 0 0 1 18 0v3M3 14v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Zm13 0v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1a2 2 0 0 0-2 2Z"/>',
   book: '<path d="M3 5h6a3 3 0 0 1 3 3v12a4 4 0 0 0-3-2H3zM21 5h-6a3 3 0 0 0-3 3v12a4 4 0 0 1 3-2h6z"/>',
@@ -37,6 +38,15 @@ function save() {
     storageWarning = true;
     live.textContent = "目前無法儲存學習紀錄。請確認瀏覽器允許網站儲存資料。";
   }
+  study.queue();
+}
+function mergeStudy(data) {
+  Object.assign(state, data);
+  audio.defaultPlaybackRate = state.rate;
+  if (state.active?.section !== "L" || state.active.mode !== "mock") audio.playbackRate = state.rate;
+  filters.unitCount = state.unitCount;
+  save();
+  if (["settings", "history", "wrong", "home"].includes(currentRoute)) render();
 }
 function esc(value = "") {
   return String(value).replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -104,7 +114,7 @@ function mocks() {
   return heading("模擬考", "限時作答，交卷後統一計分並檢討。") +
     '<div class="filters"><label>考試範圍 ' + select("mockScope", [["all", "整回 · 200 題"], ["L", "聽力 · 100 題"], ["R", "閱讀 · 100 題"]]) +
     '</label></div><div class="grid two">' + [1, 2, 3, 4].map(round => {
-      const listening = Math.ceil(timings[round].duration / 60);
+      const listening = Math.ceil(timings[round].duration / state.rate / 60);
       const details = filters.mockScope === "R" ? "閱讀 75 分鐘" : filters.mockScope === "L" ? "聽力約 " + listening + " 分鐘" :
         "聽力約 " + listening + " 分鐘 · 閱讀 75 分鐘";
       return '<article class="card"><span class="icon-tile green">' + icon("clock") + '</span><h2>第 ' + round +
@@ -159,7 +169,7 @@ function start(mode, title, ids, extra = {}) {
   if (!ids.length) return;
   if (state.active && !window.confirm("有一份未完成的練習。要捨棄目前進度並開始這一份嗎？")) return;
   stopAudio();
-  state.active = { id: String(Date.now()), mode, title, ids, index: 0, answers: {}, checked: {}, flags: {}, ...extra };
+  state.active = { id: crypto.randomUUID?.() || String(Date.now()), mode, title, ids, index: 0, answers: {}, checked: {}, flags: {}, ...extra };
   save();
   go("quiz");
   if (mode === "mock" && extra.section === "L") playMock();
@@ -198,7 +208,7 @@ function startMock(round) {
   const ids = bank.questions.filter(q => q.round === round && (scope === "all" || q.section === scope)).map(q => q.id);
   const label = scope === "all" ? "整回" : scope === "L" ? "聽力" : "閱讀";
   start("mock", "第 " + round + " 回模擬考 · " + label, ids,
-    { round, scope, section, offset: 0, deadline: section === "R" ? Date.now() + 75 * 60 * 1000 : null });
+    { round, scope, section, offset: 0, listenRate: state.rate, deadline: section === "R" ? Date.now() + 75 * 60 * 1000 : null });
 }
 function activeQuestion() {
   const session = state.active;
@@ -257,7 +267,10 @@ function registerWrong(q, choice) {
   if (!choice) return;
   const entry = state.wrong[q.id];
   if (q.answer !== choice) state.wrong[q.id] = { count: (entry?.count ?? 0) + 1, corrected: false, last: Date.now() };
-  else if (entry) entry.corrected = true;
+  else if (entry && !entry.corrected) {
+    entry.corrected = true;
+    entry.last = Date.now();
+  }
 }
 function checkAnswer() {
   const session = state.active;
@@ -301,15 +314,43 @@ function syncAudio(round) {
   audio.dataset.round = round;
   audio.src = "listening-" + round + ".m4a";
 }
+function mockPosition(session, now) {
+  const duration = timings[session.round].duration;
+  const elapsed = session.deadline ? duration - (session.deadline - now) / 1000 * (session.listenRate || 1) : 0;
+  return Math.min(duration, Math.max(session.offset || 0, elapsed));
+}
+function setSpeed(rate) {
+  const session = state.active;
+  if (session?.mode === "mock" && session.section === "L") {
+    const now = Date.now();
+    const duration = timings[session.round].duration;
+    const position = audioTarget?.mock && !audio.paused ? audio.currentTime : mockPosition(session, now);
+    if (session.deadline) session.deadline = now + Math.max(0, duration - position) * 1000 / rate;
+    session.listenRate = rate;
+    if (session.deadline) session.offset = position;
+  }
+  state.rate = rate;
+  audio.defaultPlaybackRate = rate;
+  audio.playbackRate = rate;
+  preferenceChanged();
+  tick();
+}
+function preferenceChanged() {
+  state.preferenceAt = Date.now();
+  save();
+}
 function requestAudio(target, position) {
   audioTarget = target;
   audioNotice = "";
   syncAudio(target.round);
+  const rate = target.mock ? state.active.listenRate || 1 : state.rate;
+  audio.defaultPlaybackRate = rate;
+  audio.playbackRate = rate;
   if (position !== null) audio.currentTime = Math.max(0, position);
   audio.play().then(() => {
     if (audioTarget !== target) return;
     if (target.mock && !state.active?.deadline) {
-      state.active.deadline = Date.now() + Math.ceil((timings[target.round].duration - audio.currentTime) * 1000);
+      state.active.deadline = Date.now() + Math.ceil((timings[target.round].duration - audio.currentTime) * 1000 / audio.playbackRate);
       save();
     }
     updateAudioUI();
@@ -331,10 +372,9 @@ function playMock() {
   const session = state.active;
   if (session?.mode !== "mock" || session.section !== "L") return;
   const duration = timings[session.round].duration;
-  const elapsed = session.deadline ? duration - ((session.deadline - Date.now()) / 1000) : 0;
   const target = { round: session.round, mock: true, end: duration };
   const resume = audioTarget?.mock && audioTarget.round === target.round && !audio.paused;
-  requestAudio(target, resume ? null : Math.max(session.offset || 0, elapsed, 0));
+  requestAudio(target, resume ? null : mockPosition(session, Date.now()));
 }
 function updateAudioUI() {
   const node = document.querySelector("#audio-status");
@@ -375,8 +415,32 @@ function player(q, mock) {
     (mock ? button("播放／繼續整回錄音", "mock-play") :
       button("播放", "play") + button("暫停", "pause") + button("重播本" + (q.part >= 3 ? "題組" : "題"), "replay") +
       (currentRoute === "quiz" ? '<label class="toggle small"><input id="autoplay" type="checkbox"' + (state.auto ? " checked" : "") + '> 隨題播放</label>' : "")) +
-    '</div><p class="muted small">' + (mock ? "依原錄音順序播放，可自行切換題號。" : q.part >= 3 ? "同一題組共用一段錄音。" : "請聽錄音並選出答案。") +
+    rateSelect(mock ? state.active.listenRate || 1 : state.rate) +
+    '</div><p class="muted small">' + (mock ? "依原錄音順序播放，可切換題號。倒數會依倍速調整。" : q.part >= 3 ? "同一題組共用一段錄音。" : "請聽錄音並選出答案。") +
     '<span id="audio-status" class="small" role="status"></span></p></div>';
+}
+function rateSelect(rate) {
+  return '<label class="setting-control small">播放速度 <select data-speed>' +
+    [[.5, "0.5"], [.75, "0.75"], [1, "1.0"], [1.25, "1.25"], [1.5, "1.5"]].map(([value, label]) =>
+      '<option value="' + value + '"' + (rate === value ? " selected" : "") + ">" + label + "×</option>").join("") + "</select></label>";
+}
+function settings() {
+  return heading("設定", "管理聽力偏好、跨裝置同步與作答紀錄備份。") +
+    '<div class="settings-stack"><section class="panel"><h2>練習偏好</h2><div class="actions spaced">' +
+    rateSelect(state.rate) + '<label class="setting-control"><input id="autoplay" type="checkbox"' + (state.auto ? " checked" : "") +
+    '> 聽力換題自動播放</label><label class="setting-control">預設練習題數 ' +
+    select("unitCount", [[10, "約 10 題"], [20, "約 20 題"], [0, "全部題目"]]) + '</label></div></section>' +
+    '<section class="panel"><h2>跨裝置同步</h2><p class="muted spaced">用同一組同步碼合併各裝置的歷次作答、錯題與偏好。進行中的練習留在目前瀏覽器。同步碼能存取你的加密備份，請自行保管。</p>' +
+    study.controls() + '</section><section class="panel"><h2>紀錄備份</h2><p class="muted spaced">匯出 JSON，或匯入另一台裝置的備份。匯入會和目前紀錄合併。</p>' +
+    '<div class="actions spaced">' + button("匯出備份", "backup-export") +
+    '<label class="file-control button">匯入備份<input type="file" id="backup-file" accept=".json,application/json"></label></div>' +
+    '<p id="backup-status" class="small muted spaced" role="status"></p></section>' +
+    '<section class="panel"><h2>安裝到主畫面</h2><p class="muted spaced">iPhone／iPad 用 Safari 的「分享」選「加入主畫面」。Android 用 Chrome 選單的「安裝應用程式」或「加到主畫面」。</p>' +
+    '<div class="spaced" id="install-control" hidden>' + button("安裝多益練習室", "install", "", "primary") + '</div></section></div>';
+}
+function updateSettings(message) {
+  const status = document.querySelector("#sync-status");
+  if (status) status.textContent = message;
 }
 function renderQuestion(q, chosen, checked, mockAudio) {
   const group = bank.groups[q.group];
@@ -473,7 +537,7 @@ function render() {
   }
   lastHash = hash;
   currentRoute = route;
-  const screens = { home, units, mocks, wrong, history, quiz };
+  const screens = { home, units, mocks, wrong, history, quiz, settings };
   const attempt = state.attempts.find(item => item.id === id);
   const numberScroll = app.querySelector(".numbers")?.scrollTop || 0;
   app.innerHTML = (storageWarning ? '<p class="panel" role="status">瀏覽器無法儲存紀錄，關閉頁面後可能遺失進度。</p>' : "") +
@@ -481,6 +545,10 @@ function render() {
       Object.hasOwn(screens, route) ? screens[route]() : home());
   const navigation = app.querySelector(".numbers");
   if (navigation) navigation.scrollTop = numberScroll;
+  if (route === "settings") {
+    study.renderStatus();
+    window.dispatchEvent(new Event("toeic-settings-rendered"));
+  }
   for (const link of document.querySelectorAll("nav a")) {
     if (link.hash === "#" + route) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
@@ -515,6 +583,11 @@ app.addEventListener("click", event => {
     case "pause": audio.pause(); break;
     case "replay": playClip(displayedQuestion(), true); break;
     case "mock-play": playMock(); break;
+    case "backup-export": study.download(); break;
+    case "sync-start": void study.connect(); break;
+    case "sync-now": void study.sync(); break;
+    case "sync-stop": study.disconnect(); render(); break;
+    case "sync-copy": void study.copyCode(); break;
     case "image": {
       const dialog = app.querySelector("dialog");
       dialog.querySelector("img").src = value;
@@ -531,7 +604,10 @@ app.addEventListener("change", event => {
     render();
     document.querySelector('[data-filter="' + name + '"]')?.focus();
   }
-  if (event.target.id === "autoplay") { state.auto = event.target.checked; save(); }
+  if (name === "unitCount") { state.unitCount = filters.unitCount; preferenceChanged(); }
+  if (event.target.id === "autoplay") { state.auto = event.target.checked; preferenceChanged(); }
+  if (event.target.matches("[data-speed]")) setSpeed(Number(event.target.value));
+  if (event.target.id === "backup-file") void study.importFile(event.target.files[0]);
 });
 document.addEventListener("keydown", event => {
   if (currentRoute !== "quiz" || event.altKey || event.ctrlKey || event.metaKey || app.querySelector("dialog[open]") ||
@@ -544,6 +620,9 @@ document.addEventListener("keydown", event => {
   }
 });
 window.addEventListener("hashchange", () => { if ((location.hash.slice(1) || "home") !== lastHash) render(); });
+window.addEventListener("toeic-sync-connected", render);
+window.addEventListener("focus", () => study.queue(250));
+window.addEventListener("online", () => study.queue(250));
 window.addEventListener("pagehide", () => {
   if (audioTarget?.mock && state.active?.section === "L") { state.active.offset = audio.currentTime; save(); }
 });

@@ -1,0 +1,6 @@
+CREATE TABLE progress (
+  id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  iv TEXT NOT NULL,
+  data TEXT NOT NULL
+);
