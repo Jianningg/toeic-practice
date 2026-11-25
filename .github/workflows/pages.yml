@@ -1,0 +1,42 @@
+name: Deploy TOEIC practice site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - name: Prepare website
+        run: |
+          mkdir _site
+          cp index.html app.js bank.js timings.js style.css _site/
+          for round in 1 2 3 4; do
+            name="listening-$round.m4a"
+            cat "$name.part-1" "$name.part-2" > "_site/$name"
+          done
+          unzip -q material.zip -d _site
+          test -f _site/material/l1-1-1.webp
+          test "$(find _site/material -type f -name '*.webp' | wc -l)" -eq 104
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
