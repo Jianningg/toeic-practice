@@ -19,18 +19,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/configure-pages@v5
       - name: Prepare website
-        run: |
-          mkdir _site
-          cp index.html app.js bank.js timings.js style.css study-data.js install.js sw.js manifest.webmanifest icon-192.png icon-512.png _site/
-          mkdir _site/theme
-          cp theme/person-1.webp theme/person-4.webp theme/pet-*.webp _site/theme/
-          for round in 1 2 3 4; do
-            name="listening-$round.m4a"
-            cat "$name.part-1" "$name.part-2" > "_site/$name"
-          done
-          unzip -q material.zip -d _site
-          test "$(find _site/material -type f -name '*.webp' | wc -l)" -eq 104
-          test "$(find _site/theme -type f -name '*.webp' | wc -l)" -eq 8
+        run: python3 tools/build_site.py
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site

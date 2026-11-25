@@ -1,0 +1,6 @@
+/_site/
+/.toeic-site-*/
+.wrangler/
+.env
+.dev.vars
+__pycache__/
