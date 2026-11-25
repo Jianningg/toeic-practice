@@ -6,4 +6,4 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "toeic-practice-sync"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "ec42c2a0-7b26-4ea8-9132-b009ea46d13a"

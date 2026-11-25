@@ -5,7 +5,6 @@ const timings = window.TOEIC_TIMINGS;
 const app = document.querySelector("#app");
 const audio = document.querySelector("#recording");
 const live = document.querySelector("#updates");
-const key = "toeic-study-v1";
 const letters = ["A", "B", "C", "D"];
 const parts = [
   ["照片描述", "Photographs"], ["問答", "Question–Response"], ["簡短對話", "Conversations"],
@@ -13,27 +12,21 @@ const parts = [
   ["段落填空", "Text Completion"], ["閱讀理解", "Reading Comprehension"]
 ];
 const questions = new Map(bank.questions.map(question => [question.id, question]));
-const initial = { active: null, attempts: [], wrong: {}, auto: true, rate: 1, unitCount: 10, preferenceAt: 0 };
-let state;
-try { state = { ...initial, ...JSON.parse(localStorage.getItem(key)) }; }
-catch { state = { ...initial }; }
+const initial = { active: null, attempts: [], wrong: {}, auto: true, rate: 1, unitCount: 10, petId: 1, petVisible: true, preferenceAt: 0 };
+const profile = window.createStudyProfile("toeic-study-v1", initial);
+let state = profile.read(profile.code);
 let storageWarning = false;
 let currentRoute;
 let audioTarget = null;
 let audioNotice = "";
 let mockSavedSecond = 0;
 let mockCue = 0;
-const themePhotos = [
-  ["theme/person-1.webp", "50% 50%"], ["theme/person-2.webp", "50% 29%"],
-  ["theme/person-3.webp", "50% 38%"], ["theme/person-4.webp", "50% 43%"],
-  ["theme/person-5.webp", "50% 57%"], ["theme/person-6.webp", "50% 44%"]
-];
-const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
-let themeIndex = 0;
-let themePlaying = !reducedMotion.matches;
-let themeTimer;
+const pets = ["太陽", "紅白條紋", "比愛心", "黃色墨鏡", "黑色上衣", "淺藍上衣"];
+const petLines = ["一起練習吧！", "做完這題就很棒！", "準備好再聽一次。", "照自己的節奏來！"];
+let petMessage = 0;
+let petTimer;
 const filters = { unitRound: 0, unitCount: state.unitCount, mockScope: "all", wrongPart: 0, wrongRound: 0, wrongStatus: "open" };
-const study = window.createStudyData(questions, () => state, mergeStudy, updateSettings);
+const study = window.createStudyData(questions, () => state, mergeStudy, updateSettings, profile, switchStudyProfile);
 const icons = {
   headphones: '<path d="M3 14v-3a9 9 0 0 1 18 0v3M3 14v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Zm13 0v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1a2 2 0 0 0-2 2Z"/>',
   book: '<path d="M3 5h6a3 3 0 0 1 3 3v12a4 4 0 0 0-3-2H3zM21 5h-6a3 3 0 0 0-3 3v12a4 4 0 0 1 3-2h6z"/>',
@@ -42,12 +35,18 @@ const icons = {
 };
 
 function save() {
-  try { localStorage.setItem(key, JSON.stringify(state)); }
+  try { profile.write(state); }
   catch {
     storageWarning = true;
     live.textContent = "目前無法儲存學習紀錄。請確認瀏覽器允許網站儲存資料。";
   }
   study.queue();
+}
+function switchStudyProfile(code, remote) {
+  const saved = profile.activate(code);
+  stopAudio();
+  state = saved;
+  mergeStudy(remote || {});
 }
 function mergeStudy(data) {
   Object.assign(state, data);
@@ -102,34 +101,39 @@ function home() {
   const resume = state.active ? ' <a class="button secondary" href="#quiz">繼續作答</a>' : "";
   return '<section class="hero"><div><h1>多益練習室</h1><p>四回多益聽力與閱讀練習，共 ' + bank.questions.length +
     ' 題。</p><div class="actions"><a class="button primary" href="#units">開始練習</a>' + resume +
-    '</div></div>' + themeCarousel() + '</section><section><div class="section-head"><h2>選擇練習方式</h2></div><div class="grid">' +
+    '</div></div><div class="hero-pet"><img src="' + petFile() + '" alt="" width="112" height="126">' +
+    '<a class="button secondary" href="#settings/pet">選擇陪練角色</a></div></section><section><div class="section-head"><h2>選擇練習方式</h2></div><div class="grid">' +
     modes.map(([route, graphic, color, title, subtitle]) => '<a class="card" href="#' + route + '"><span class="icon-tile ' + color + '">' + icon(graphic) +
       '</span><h3>' + title + '</h3><p class="muted small">' + subtitle + '</p></a>').join("") +
     '</div></section><section><div class="section-head"><h2>學習概況</h2><a class="link small" href="#history">查看紀錄</a></div>' + stats() + "</section>";
 }
-function themeCarousel() {
-  const [file, position] = themePhotos[themeIndex];
-  return '<section class="hero-carousel" aria-label="主題人物輪播"><div class="theme-frame">' +
-    '<img src="' + file + '" style="object-position:' + position + '" alt="多益練習室主題人物"></div>' +
-    '<div class="theme-controls" aria-label="照片控制">' + button("上一張", "theme-previous") +
-    button(themePlaying ? "暫停" : "播放", "theme-toggle") + button("下一張", "theme-next") + '</div></section>';
+function petFile(id = state.petId) {
+  return "theme/pet-" + (pets[id - 1] ? id : 1) + ".webp";
 }
-function scheduleTheme() {
-  clearTimeout(themeTimer);
-  if (currentRoute !== "home" || document.hidden || !themePlaying) return;
-  const next = new Image();
-  next.src = themePhotos[(themeIndex + 1) % themePhotos.length][0];
-  themeTimer = setTimeout(() => moveTheme(1), 5000);
+function updatePet() {
+  const dock = document.querySelector("#pet-dock");
+  const image = document.querySelector("#pet-image");
+  const file = petFile();
+  if (image.getAttribute("src") !== file) image.src = file;
+  dock.hidden = !state.petVisible || currentRoute === "settings";
+  const brand = document.querySelector("#brand-photo");
+  const badge = state.petId === 4 ? "theme/person-4.webp" : "theme/person-1.webp";
+  if (brand.getAttribute("src") !== badge) brand.src = badge;
 }
-function moveTheme(step) {
-  themeIndex = (themeIndex + step + themePhotos.length) % themePhotos.length;
-  const photo = document.querySelector(".theme-frame img");
-  if (photo) {
-    const [file, position] = themePhotos[themeIndex];
-    photo.src = file;
-    photo.style.objectPosition = position;
-  }
-  scheduleTheme();
+function choosePet(id) {
+  if (!pets[id - 1]) return;
+  state.petId = id;
+  state.petVisible = true;
+  preferenceChanged();
+  render();
+  document.querySelector('[data-action="pet-select"][data-value="' + id + '"]')?.focus({ preventScroll: true });
+}
+function petSettings() {
+  return '<section class="panel" id="pet-settings"><h2>陪練角色</h2>' +
+    '<label class="setting-control spaced"><input type="checkbox" id="pet-visible"' + (state.petVisible ? " checked" : "") + '> 在網頁上顯示走動角色</label>' +
+    '<div class="pet-choices spaced">' + pets.map((name, index) =>
+      '<button type="button" data-action="pet-select" data-value="' + (index + 1) + '" aria-pressed="' + (state.petId === index + 1) +
+      '"><img src="' + petFile(index + 1) + '" width="68" height="78" alt=""><span>' + name + '</span></button>').join("") + '</div></section>';
 }
 function units() {
   const tiles = (start, end) => '<div class="grid">' + parts.slice(start - 1, end).map(([name, english], i) => {
@@ -462,9 +466,9 @@ function settings() {
     '<div class="settings-stack"><section class="panel"><h2>練習偏好</h2><div class="actions spaced">' +
     rateSelect(state.rate) + '<label class="setting-control"><input id="autoplay" type="checkbox"' + (state.auto ? " checked" : "") +
     '> 聽力換題自動播放</label><label class="setting-control">預設練習題數 ' +
-    select("unitCount", [[10, "約 10 題"], [20, "約 20 題"], [0, "全部題目"]]) + '</label></div></section>' +
-    '<section class="panel"><h2>跨裝置同步</h2><p class="muted spaced">用同一組同步碼合併各裝置的歷次作答、錯題與偏好。進行中的練習留在目前瀏覽器。同步碼能存取你的加密備份，請自行保管。</p>' +
-    study.controls() + '</section><section class="panel"><h2>紀錄備份</h2><p class="muted spaced">匯出 JSON，或匯入另一台裝置的備份。匯入會和目前紀錄合併。</p>' +
+    select("unitCount", [[10, "約 10 題"], [20, "約 20 題"], [0, "全部題目"]]) + '</label></div></section>' + petSettings() +
+    '<section class="panel"><h2>跨裝置同步</h2><p class="muted spaced">第一次開啟就會取得同步碼。每組碼有自己的作答紀錄、錯題與偏好。換裝置時輸入原本的碼即可切換，請自行保管同步碼。進行中的練習留在目前瀏覽器。</p>' +
+    study.controls() + '</section><section class="panel"><h2>紀錄備份</h2><p class="muted spaced">匯出 JSON 時會一起備份同步碼。匯入時會切換到備份中的碼，並和同一組碼的紀錄合併。請自己保管備份檔。</p>' +
     '<div class="actions spaced">' + button("匯出備份", "backup-export") +
     '<label class="file-control button">匯入備份<input type="file" id="backup-file" accept=".json,application/json"></label></div>' +
     '<p id="backup-status" class="small muted spaced" role="status"></p></section>' +
@@ -564,6 +568,7 @@ let lastHash;
 function render() {
   const hash = location.hash.slice(1) || "home";
   const [route, id, index] = hash.split("/");
+  const changedRoute = hash !== lastHash;
   if (hash !== lastHash) {
     if ((currentRoute === "quiz" && route !== "quiz") || currentRoute === "review") stopAudio();
     if (!(currentRoute === "review" && route === "review")) window.scrollTo(0, 0);
@@ -582,7 +587,8 @@ function render() {
     study.renderStatus();
     window.dispatchEvent(new Event("toeic-settings-rendered"));
   }
-  scheduleTheme();
+  updatePet();
+  if (changedRoute && route === "settings" && id === "pet") document.querySelector("#pet-settings")?.scrollIntoView();
   for (const link of document.querySelectorAll("nav a")) {
     if (link.hash === "#" + route) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
@@ -617,15 +623,10 @@ app.addEventListener("click", event => {
     case "pause": audio.pause(); break;
     case "replay": playClip(displayedQuestion(), true); break;
     case "mock-play": playMock(); break;
-    case "theme-previous": moveTheme(-1); break;
-    case "theme-next": moveTheme(1); break;
-    case "theme-toggle":
-      themePlaying = !themePlaying;
-      control.textContent = themePlaying ? "暫停" : "播放";
-      scheduleTheme();
-      break;
+    case "pet-select": choosePet(Number(value)); break;
     case "backup-export": study.download(); break;
     case "sync-start": void study.connect(); break;
+    case "sync-switch": void study.changeCode(); break;
     case "sync-now": void study.sync(); break;
     case "sync-stop": study.disconnect(); render(); break;
     case "sync-copy": void study.copyCode(); break;
@@ -647,6 +648,7 @@ app.addEventListener("change", event => {
   }
   if (name === "unitCount") { state.unitCount = filters.unitCount; preferenceChanged(); }
   if (event.target.id === "autoplay") { state.auto = event.target.checked; preferenceChanged(); }
+  if (event.target.id === "pet-visible") { state.petVisible = event.target.checked; preferenceChanged(); updatePet(); }
   if (event.target.matches("[data-speed]")) setSpeed(Number(event.target.value));
   if (event.target.id === "backup-file") void study.importFile(event.target.files[0]);
 });
@@ -663,12 +665,15 @@ document.addEventListener("keydown", event => {
 window.addEventListener("hashchange", () => { if ((location.hash.slice(1) || "home") !== lastHash) render(); });
 window.addEventListener("toeic-sync-connected", render);
 window.addEventListener("focus", () => study.queue(250));
-document.addEventListener("visibilitychange", scheduleTheme);
-reducedMotion.addEventListener("change", event => {
-  if (event.matches) themePlaying = false;
-  const button = document.querySelector('[data-action="theme-toggle"]');
-  if (button) button.textContent = themePlaying ? "暫停" : "播放";
-  scheduleTheme();
+document.querySelector("#pet-interact").addEventListener("click", event => {
+  const bubble = document.querySelector("#pet-bubble");
+  const control = event.currentTarget;
+  bubble.textContent = petLines[petMessage++ % petLines.length];
+  bubble.hidden = false;
+  control.classList.remove("pet-hop");
+  requestAnimationFrame(() => control.classList.add("pet-hop"));
+  clearTimeout(petTimer);
+  petTimer = setTimeout(() => { bubble.hidden = true; control.classList.remove("pet-hop"); }, 2200);
 });
 window.addEventListener("online", () => study.queue(250));
 window.addEventListener("pagehide", () => {

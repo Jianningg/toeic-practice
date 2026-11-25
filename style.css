@@ -32,7 +32,7 @@ h3 { font-size: 1.1rem; }
 .topbar { background: var(--surface); border-bottom: 1px solid var(--line); }
 .topbar-inner { min-height: 68px; display: flex; gap: 2.4rem; align-items: center; justify-content: space-between; }
 .brand { display: inline-flex; align-items: center; gap: .65rem; flex-shrink: 0; font-weight: 800; }
-.brand-icon { display: grid; place-items: center; color: white; background: var(--primary); border-radius: 10px; width: 36px; height: 36px; font-weight: 800; }
+.brand-icon { display: block; object-fit: cover; background: var(--primary); border-radius: 10px; width: 36px; height: 36px; }
 nav { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
 nav a { padding: .45rem .65rem; border-radius: 7px; color: var(--muted); font-size: .9rem; font-weight: 650; white-space: nowrap; }
 nav a:hover, nav a[aria-current] { background: var(--pale); color: var(--primary-dark); }
@@ -43,12 +43,25 @@ main { padding-block: 2.4rem 4rem; }
 .hero .actions { margin-top: 1.4rem; }
 .hero .primary { background: white; border-color: white; color: #30339f; }
 .hero .secondary { background: #383c81; border-color: #787bb2; color: white; }
-.hero-carousel { width: clamp(215px, 23vw, 280px); display: grid; gap: .55rem; }
-.theme-frame { overflow: hidden; width: 100%; aspect-ratio: 1.18; border: 1px solid #9b9ce2; border-radius: 15px; background: #303474; }
-.theme-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.theme-controls { display: flex; justify-content: center; gap: .4rem; }
-.theme-controls button { background: #343775; border-color: #8387bd; color: white; flex: 1; font-size: .875rem; padding: .38rem .45rem; white-space: nowrap; }
-.theme-controls button:hover { background: #4a4e91; border-color: #d9dbff; }
+.hero-pet { justify-items: center; display: grid; gap: .6rem; }
+.hero-pet img { object-fit: contain; width: 112px; height: 126px; }
+.pet-choices { display: grid; grid-template-columns: repeat(auto-fit,minmax(108px,1fr)); gap: .6rem; }
+.pet-choices button { display: grid; justify-items: center; gap: .3rem; font-size: .9rem; }
+.pet-choices button[aria-pressed="true"] { background: var(--pale); border-color: var(--primary); }
+.pet-choices img, .pet-dock img { object-fit: contain; }
+.pet-dock { position: fixed; right: max(12px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); z-index: 4; pointer-events: none; animation: pet-wander 18s ease-in-out infinite; }
+.pet-dock:has(.pet-bubble:not([hidden])), .pet-dock:focus-within, .pet-dock:hover { animation-play-state: paused; }
+.pet-dock button { pointer-events: auto; border: 0; background: transparent; padding: 0; display: block; border-radius: 12px; touch-action: manipulation; }
+.pet-dock img { display: block; filter: drop-shadow(0 3px 3px #1b22474d); }
+.pet-dock button.pet-hop { animation: pet-hop .36s ease-out; }
+.pet-bubble { position: absolute; inset: auto 0 calc(100% + 3px) auto; width: max-content; max-width: 155px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: .35rem .6rem; font-size: .875rem; box-shadow: 0 2px 10px #18244120; }
+@keyframes pet-wander {
+  0%, 18%, 90%, 100% { transform: translate(0,0); }
+  32%, 70% { transform: translate(-30px,-2px); }
+  47%, 59% { transform: translate(-57px,0); }
+}
+@keyframes pet-hop { 45% { transform: translateY(-10px); } }
+@media (prefers-reduced-motion: reduce) { .pet-dock, .pet-dock button.pet-hop { animation: none; } }
 .section-head { margin: 2rem 0 1rem; display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
 .page-head { margin-bottom: 1.35rem; }
 .page-head p { margin-top: .55rem; }
@@ -102,6 +115,7 @@ a.card:hover { border-color: var(--primary); }
 .settings-stack { display: grid; gap: 1rem; }
 .settings-stack .spaced { margin-top: .75rem; }
 .settings-stack input[type="text"], .settings-stack input[type="url"] { min-width: 0; max-width: 100%; width: 34ch; border: 1px solid var(--line); border-radius: 8px; padding: .45rem .55rem; }
+.settings-stack .setting-control:has(input[type="text"], input[type="url"]) { max-width: 100%; flex-wrap: wrap; }
 .file-control { position: relative; cursor: pointer; }
 .file-control:focus-within { outline: 3px solid #7a7dee; outline-offset: 3px; }
 .file-control input { position: absolute; inset: 0; width: 100%; cursor: pointer; opacity: 0; }
@@ -129,8 +143,9 @@ a.card:hover { border-color: var(--primary); }
 @media (max-width: 520px) {
   .grid, .grid.two { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr; }
-  .hero-carousel { width: min(100%, 290px); }
-  .theme-frame { aspect-ratio: 1.4; }
+  .hero-pet { grid-template-columns: auto 1fr; justify-self: start; align-items: center; }
+  .hero-pet img { width: 66px; height: 72px; }
+  .pet-dock img { width: 54px; height: 62px; }
   .stats > div { padding: .65rem; }
   .quiz-head { align-items: flex-start; }
   .filters label { flex-wrap: wrap; }

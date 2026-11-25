@@ -1,21 +1,67 @@
 "use strict";
 
-window.createStudyData = (questions, getState, apply, notify) => {
-  const configKey = "toeic-sync-v1";
+const profileCodePattern = /^[a-f0-9]{64}$/;
+const syncConfigKey = "toeic-sync-v1";
+const toHex = value => Array.from(new Uint8Array(value), byte => byte.toString(16).padStart(2, "0")).join("");
+
+window.createStudyProfile = (legacyKey, defaults) => {
+  const pointer = "toeic-active-code-v1";
+  const storageKey = code => "toeic-profile-v1:" + code;
+  let currentCode;
+  let snapshot = structuredClone(defaults);
+  try {
+    const active = localStorage.getItem(pointer);
+    const oldSync = JSON.parse(localStorage.getItem(syncConfigKey));
+    currentCode = profileCodePattern.test(active || "") ? active :
+      profileCodePattern.test(oldSync?.code || "") ? oldSync.code : undefined;
+    const data = active && currentCode ? localStorage.getItem(storageKey(currentCode)) : localStorage.getItem(legacyKey);
+    if (data) snapshot = { ...snapshot, ...JSON.parse(data) };
+  } catch { /* Keep the current device usable when storage is unavailable. */ }
+  currentCode ||= toHex(crypto.getRandomValues(new Uint8Array(32)));
+  function write(data) {
+    snapshot = data;
+    localStorage.setItem(storageKey(currentCode), JSON.stringify(data));
+  }
+  try { write(snapshot); localStorage.setItem(pointer, currentCode); } catch { /* Report failure on a user write. */ }
+  function read(code) {
+    if (code === currentCode) return snapshot;
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem(storageKey(code))); } catch { /* Fall back to a new profile. */ }
+    return { ...structuredClone(defaults), ...saved };
+  }
+  return {
+    get code() { return currentCode; },
+    read,
+    write,
+    has(code) {
+      try { return !!localStorage.getItem(storageKey(code)); } catch { return false; }
+    },
+    activate(code) {
+      const next = read(code);
+      localStorage.setItem(storageKey(code), JSON.stringify(next));
+      localStorage.setItem(pointer, code);
+      currentCode = code;
+      snapshot = next;
+      return next;
+    }
+  };
+};
+
+window.createStudyData = (questions, getState, apply, notify, profile, switchProfile) => {
+  const defaultEndpoint = document.querySelector('meta[name="toeic-sync-url"]')?.content || "";
   const sizeLimit = 1024 * 1024;
   const rates = [.5, .75, 1, 1.25, 1.5];
   const counts = [0, 10, 20];
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  const codePattern = /^[a-f0-9]{64}$/;
   let config = {};
   let timer;
   let inFlight = false;
   let applying = false;
   let message = "";
   try {
-    const stored = JSON.parse(localStorage.getItem(configKey));
-    if (stored && codePattern.test(stored.code)) config = { code: stored.code, endpoint: endpoint(stored.endpoint) };
+    const stored = JSON.parse(localStorage.getItem(syncConfigKey));
+    if (stored?.endpoint) config = { endpoint: endpoint(stored.endpoint) };
   } catch { /* Local storage is optional. */ }
 
   function normalize(data) {
@@ -43,6 +89,8 @@ window.createStudyData = (questions, getState, apply, notify) => {
       wrong: Object.fromEntries(Object.entries(wrong).sort(([a], [b]) => a.localeCompare(b))),
       auto: data.auto !== false, rate: rates.includes(data.rate) ? data.rate : 1,
       unitCount: counts.includes(data.unitCount) ? data.unitCount : 10,
+      petId: Number.isInteger(data.petId) && data.petId >= 1 && data.petId <= 6 ? data.petId : 1,
+      petVisible: data.petVisible !== false,
       preferenceAt: Number.isFinite(data.preferenceAt) ? data.preferenceAt : 0 };
   }
   function merge(local, other) {
@@ -69,7 +117,7 @@ window.createStudyData = (questions, getState, apply, notify) => {
     return merged;
   }
   function download() {
-    const backup = { format: "toeic-study", version: 1, ...normalize(getState()) };
+    const backup = { format: "toeic-study", version: 2, profileCode: profile.code, ...normalize(getState()) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -83,8 +131,13 @@ window.createStudyData = (questions, getState, apply, notify) => {
     try {
       if (file.size > sizeLimit * 2) throw new Error("備份檔太大。");
       const data = JSON.parse(await file.text());
-      if (data.format !== "toeic-study" || data.version !== 1) throw new Error("請選擇多益練習室匯出的備份。");
-      applyMerged(normalize(data));
+      const code = data.version === 2 ? data.profileCode : null;
+      if (data.format !== "toeic-study" || ![1, 2].includes(data.version) ||
+          (data.version === 2 && (typeof code !== "string" || !profileCodePattern.test(code)))) throw new Error("請選擇多益練習室匯出的備份。");
+      const restored = normalize(data);
+      if (code && code !== profile.code) {
+        switchProfile(code, merge(normalize(profile.read(code)), restored));
+      } else applyMerged(restored);
       queue();
       result = "已合併備份。";
     } catch (error) { result = error instanceof SyntaxError ? "這個檔案不是有效的 JSON。" : error.message; }
@@ -92,7 +145,6 @@ window.createStudyData = (questions, getState, apply, notify) => {
     if (status) status.textContent = result;
   }
 
-  const hex = value => Array.from(new Uint8Array(value), byte => byte.toString(16).padStart(2, "0")).join("");
   const hash = value => crypto.subtle.digest("SHA-256", encoder.encode(value));
   const base64 = value => {
     const bytes = new Uint8Array(value);
@@ -102,9 +154,9 @@ window.createStudyData = (questions, getState, apply, notify) => {
   };
   const binary = value => Uint8Array.from(atob(value), character => character.charCodeAt(0));
   async function credentials(code) {
-    const bearer = hex(await hash("toeic-auth:" + code));
+    const bearer = toHex(await hash("toeic-auth:" + code));
     return {
-      bearer, id: hex(await hash(bearer)),
+      bearer, id: toHex(await hash(bearer)),
       key: await crypto.subtle.importKey("raw", await hash("toeic-data:" + code), "AES-GCM", false, ["encrypt", "decrypt"])
     };
   }
@@ -118,13 +170,13 @@ window.createStudyData = (questions, getState, apply, notify) => {
     return fetch(url, { ...options, credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(15000),
       headers: { Authorization: "Bearer " + bearer, ...options?.headers } });
   }
-  async function transfer(connection) {
+  async function transfer(connection, readSnapshot = getState) {
     const access = await credentials(connection.code);
     const url = connection.endpoint + "/v1/" + access.id;
     for (let attempt = 0; attempt < 3; attempt++) {
       const response = await request(url, access.bearer);
       if (!response.ok && response.status !== 404) throw new Error("同步服務暫時無法讀取。");
-      const local = normalize(getState());
+      const local = normalize(readSnapshot());
       let merged = local;
       let version = "0";
       if (response.ok) {
@@ -148,18 +200,18 @@ window.createStudyData = (questions, getState, apply, notify) => {
     throw new Error("另一台裝置正在更新，請稍後再試。");
   }
   function persist(connection) {
-    localStorage.setItem(configKey, JSON.stringify(connection));
+    localStorage.setItem(syncConfigKey, JSON.stringify(connection));
     config = connection;
   }
-  async function sync(connection = config, first = false) {
-    if (!connection.code || inFlight) return;
+  async function sync(connection = { ...config, code: profile.code }, first = false) {
+    if (!connection.endpoint || inFlight) return;
     clearTimeout(timer);
     inFlight = true;
     report("正在同步…");
     try {
       const remote = await transfer(connection);
-      if (first) persist({ endpoint: connection.endpoint, code: connection.code });
-      if (config.code !== connection.code) return;
+      if (first) persist({ endpoint: connection.endpoint });
+      if (profile.code !== connection.code) return;
       applyMerged(remote);
       report("已同步 · " + new Intl.DateTimeFormat("zh-TW", { timeStyle: "short" }).format(new Date()));
       if (first) window.dispatchEvent(new Event("toeic-sync-connected"));
@@ -169,7 +221,7 @@ window.createStudyData = (questions, getState, apply, notify) => {
     } finally { inFlight = false; }
   }
   function queue(delay = 5000) {
-    if (!config.code || applying) return;
+    if (!config.endpoint || applying) return;
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (inFlight) queue();
@@ -177,13 +229,36 @@ window.createStudyData = (questions, getState, apply, notify) => {
     }, delay);
   }
   async function connect() {
-    if (inFlight || config.code) return;
+    if (inFlight || config.endpoint) return;
     try {
-      const server = window.TOEIC_SYNC_URL || document.querySelector("#sync-endpoint").value.trim();
-      const code = document.querySelector("#sync-code").value.trim().toLowerCase();
-      if (code && !codePattern.test(code)) throw new Error("請輸入完整的同步碼。");
-      await sync({ endpoint: endpoint(server), code: code || hex(crypto.getRandomValues(new Uint8Array(32))), join: !!code }, true);
+      const server = defaultEndpoint || document.querySelector("#sync-endpoint").value.trim();
+      await sync({ endpoint: endpoint(server), code: profile.code }, true);
     } catch (error) { report(error instanceof TypeError ? "請輸入有效的 HTTPS 同步服務網址。" : error.message); }
+  }
+  async function changeCode() {
+    if (inFlight) return;
+    const code = document.querySelector("#sync-code").value.trim().toLowerCase();
+    if (!profileCodePattern.test(code)) { report("請輸入完整的同步碼。"); return; }
+    if (code === profile.code) { report("目前已使用這組同步碼。"); return; }
+    clearTimeout(timer);
+    inFlight = true;
+    try {
+      const known = profile.has(code);
+      const input = document.querySelector("#sync-endpoint")?.value.trim();
+      const server = config.endpoint || defaultEndpoint || input;
+      if (!known && !server) throw new Error("找不到此裝置上的同步碼。跨裝置切換需要同步服務。");
+      let remote;
+      if (server) {
+        report("正在讀取這組同步碼的資料…");
+        const url = endpoint(server);
+        remote = await transfer({ endpoint: url, code, join: !known }, () => profile.read(code));
+        if (!config.endpoint) persist({ endpoint: url });
+      }
+      switchProfile(code, remote);
+      report("已切換同步碼。");
+    } catch (error) {
+      report(error instanceof TypeError || error.name === "TimeoutError" ? "目前連不上同步服務。原本的紀錄已保留。" : error.message);
+    } finally { inFlight = false; }
   }
   function disconnect() {
     if (inFlight || !window.confirm("停止這台裝置的同步？本機紀錄與雲端備份會保留。")) return;
@@ -191,24 +266,23 @@ window.createStudyData = (questions, getState, apply, notify) => {
     catch { report("目前無法更改同步設定。"); }
   }
   async function copyCode() {
-    if (!config.code) return;
-    try { await navigator.clipboard.writeText(config.code); report("同步碼已複製。"); }
+    try { await navigator.clipboard.writeText(profile.code); report("同步碼已複製。"); }
     catch { report("無法自動複製。請選取同步碼欄位手動複製。"); }
   }
   function controls() {
     const status = '<p id="sync-status" class="small muted spaced" role="status"></p>';
-    if (config.code) {
-      return '<div class="actions spaced"><label class="setting-control">同步碼 <input type="text" readonly value="' + config.code +
-        '"></label><button data-action="sync-copy">複製</button><button data-action="sync-now">立即同步</button>' +
-        '<button data-action="sync-stop">停止這台裝置同步</button></div>' + status;
-    }
-    return '<div class="actions spaced">' + (window.TOEIC_SYNC_URL ? "" :
-      '<p class="muted small">雲端同步需要已部署的同步服務。也可以用下方的 JSON 備份搬移紀錄。</p><label class="setting-control">同步服務網址 <input type="url" id="sync-endpoint" placeholder="https://" autocomplete="off"></label>') +
-      '<label class="setting-control">同步碼 <input type="text" id="sync-code" placeholder="首次啟用可留空" autocomplete="off" spellcheck="false"></label>' +
-      '<button class="primary" data-action="sync-start">啟用同步</button></div>' + status;
+    const code = '<div class="actions spaced"><label class="setting-control">目前同步碼 <input type="text" readonly value="' +
+      profile.code + '"></label><button data-action="sync-copy">複製同步碼</button></div>';
+    const service = config.endpoint ? '<div class="actions spaced"><button data-action="sync-now">立即同步</button>' +
+      '<button data-action="sync-stop">停用雲端同步</button></div>' : '<div class="actions spaced">' +
+      (defaultEndpoint ? "" : '<label class="setting-control">同步服務網址 <input type="url" id="sync-endpoint" placeholder="https://" autocomplete="off"></label>') +
+      '<button data-action="sync-start">啟用雲端同步</button></div>';
+    return code + service +
+      '<div class="actions spaced"><label class="setting-control">另一組同步碼 <input type="text" id="sync-code" autocomplete="off" spellcheck="false"></label>' +
+      '<button data-action="sync-switch">切換同步碼</button></div>' + status;
   }
   const renderStatus = () => { if (message) notify(message); };
   queue();
   setInterval(() => { if (!document.hidden) queue(250); }, 45000);
-  return { download, importFile, controls, queue, sync, connect, disconnect, copyCode, renderStatus };
+  return { download, importFile, controls, queue, sync, connect, changeCode, disconnect, copyCode, renderStatus };
 };

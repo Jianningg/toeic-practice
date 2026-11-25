@@ -1,11 +1,12 @@
 "use strict";
 
 const prefix = "toeic-practice-";
-const cacheName = prefix + "2";
+const cacheName = prefix + "4";
 const scope = new URL(self.registration.scope);
 const shell = ["./", "index.html", "style.css", "app.js", "bank.js", "timings.js",
   "study-data.js", "install.js", "manifest.webmanifest", "icon-192.png", "icon-512.png",
-  ...Array.from({ length: 6 }, (_, index) => "theme/person-" + (index + 1) + ".webp")];
+  "theme/person-1.webp", "theme/person-4.webp",
+  ...Array.from({ length: 6 }, (_, index) => "theme/pet-" + (index + 1) + ".webp")];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(shell)));

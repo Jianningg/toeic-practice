@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f6f7fb">
+  <meta name="toeic-sync-url" content="https://toeic-practice-sync.aa2006414.workers.dev">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="description" content="多益聽讀刷題、四回模擬考與錯題複習。">
   <title>多益練習室</title>
@@ -19,13 +20,17 @@
 <body>
   <header class="topbar">
     <div class="shell topbar-inner">
-      <a class="brand" href="#home" aria-label="多益練習室首頁"><span class="brand-icon" aria-hidden="true">T</span>多益練習室</a>
+      <a class="brand" href="#home" aria-label="多益練習室首頁"><img id="brand-photo" class="brand-icon" src="theme/person-1.webp" alt="" width="36" height="36">多益練習室</a>
       <nav aria-label="主要導覽">
         <a href="#home">首頁</a><a href="#units">單元題庫</a><a href="#mocks">模擬考</a><a href="#wrong">錯題本</a><a href="#history">學習紀錄</a><a href="#settings">設定</a>
       </nav>
     </div>
   </header>
   <main id="app" class="shell" tabindex="-1"></main>
+  <div class="pet-dock" id="pet-dock" hidden>
+    <div class="pet-bubble" id="pet-bubble" role="status" hidden></div>
+    <button type="button" id="pet-interact" aria-label="和陪練角色互動"><img id="pet-image" alt="" width="70" height="82"></button>
+  </div>
   <div id="updates" class="sr-only" aria-live="polite"></div>
   <audio id="recording" preload="metadata"></audio>
   <noscript>請啟用 JavaScript 以開始練習。</noscript>
